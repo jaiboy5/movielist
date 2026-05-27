@@ -162,7 +162,7 @@ function App() {
   const [errMsg, setErrMsg] = React.useState("");
 
   // refs used to break the remote→local→remote write loop
-  const applyingRemote = React.useRef(false);
+  const lastRemoteRef  = React.useRef(null);  // tracks the last array received from Firestore
   const fbRef          = React.useRef(null);
   const saveTimer      = React.useRef(null);
 
@@ -187,11 +187,13 @@ function App() {
         (snap) => {
           if (cancelled) return;
           clearTimeout(offlineFallback);
-          applyingRemote.current = true;
           if (snap.exists() && Array.isArray(snap.data().movies)) {
+            lastRemoteRef.current = snap.data().movies;
             setMovies(snap.data().movies);
-          } else {
+          } else if (!snap.exists()) {
+            // Genuinely new document — seed it for the first time
             const seed = seedList();
+            lastRemoteRef.current = seed;
             setMovies(seed);
             fb.setDoc({ movies: seed }).catch((err) => {
               console.error("[firestore write]", err);
@@ -200,10 +202,15 @@ function App() {
                 ? "Rules not published — see console.firebase.google.com → Firestore → Rules"
                 : err.message);
             });
+          } else {
+            // Document exists but data is unexpected — do NOT overwrite
+            console.error("[firestore] unexpected data format, not overwriting:", snap.data());
+            setSync("offline");
+            setErrMsg("Unexpected data format in Firestore — not overwriting");
+            return;
           }
           setSync("live");
           setErrMsg("");
-          queueMicrotask(() => { applyingRemote.current = false; });
         },
         (err) => {
           console.error("[firestore read]", err);
@@ -227,8 +234,8 @@ function App() {
 
   // Debounced push to Firestore on any local change
   React.useEffect(() => {
-    if (movies === null) return;            // not loaded yet
-    if (applyingRemote.current) return;     // change came FROM Firestore
+    if (movies === null) return;                    // not loaded yet
+    if (movies === lastRemoteRef.current) return;   // change came FROM Firestore
     if (!fbRef.current) return;
     if (sync === "offline") return;         // don't try to save when we know we can't
     setSync("saving");
