@@ -992,6 +992,7 @@ function Row({ m, index, update, remove }) {
         placeholder="add a film…"
         value={m.title}
         onChange={(e) => update({ title: e.target.value })}
+        onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
       />
       <input
         className="year-input"
@@ -999,6 +1000,7 @@ function Row({ m, index, update, remove }) {
         maxLength={4}
         value={m.year}
         onChange={(e) => update({ year: e.target.value.replace(/[^\d]/g, "") })}
+        onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
       />
       <WhoToggle value={m.who} onChange={(v) => update({ who: v })} />
       <HypeDots value={m.hype} onChange={(v) => update({ hype: v })} />
@@ -1076,6 +1078,10 @@ function App() {
   const lastRemoteRef  = React.useRef(null);  // tracks the last array received from Firestore
   const fbRef          = React.useRef(null);
   const saveTimer      = React.useRef(null);
+  const syncRef        = React.useRef("connecting");
+  const isTypingRef    = React.useRef(false);
+  const typingTimer    = React.useRef(null);
+  React.useEffect(() => { syncRef.current = sync; }, [sync]);
 
   React.useEffect(() => {
     let unsub = null;
@@ -1097,7 +1103,9 @@ function App() {
           clearTimeout(offlineFallback);
           if (snap.exists() && Array.isArray(snap.data().movies)) {
             lastRemoteRef.current = snap.data().movies;
-            setMovies(snap.data().movies);
+            if (!isTypingRef.current){
+              setMovies(snap.data().movies);
+            }
           } else if (!snap.exists()) {
             // Genuinely new document — seed it for the first time
             const seed = seedList();
@@ -1142,9 +1150,9 @@ function App() {
 
   React.useEffect(() => {
     if (movies === null) return;                    // not loaded yet
-    if (movies === lastRemoteRef.current) return;   // change came FROM Firestore
+    if (JSON.stringify(movies) === JSON.stringify(lastRemoteRef.current)) return;   // change came FROM Firestore
     if (!fbRef.current) return;
-    if (sync === "offline") return;
+    if (syncRef.current === "offline") return;
     setSync("saving");
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
@@ -1158,11 +1166,16 @@ function App() {
             : err.message);
         });
     }, 500);
-  }, [movies]);
+  }, [movies, sync]);
 
   const update = React.useCallback((id, patch) => {
-    setMovies((ms) => ms.map((m) => (m.id === id ? { ...m, ...patch } : m)));
-  }, []);
+  isTypingRef.current = true;
+  clearTimeout(typingTimer.current);
+  typingTimer.current = setTimeout(() => {
+    isTypingRef.current = false;
+  }, 2000);
+  setMovies((ms) => ms.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+}, []);
   const remove = React.useCallback((id) => {
     setMovies((ms) => ms.filter((m) => m.id !== id));
   }, []);
